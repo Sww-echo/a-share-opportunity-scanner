@@ -1,0 +1,11 @@
+{
+  "provider": "sample",
+  "generated_at": "2026-03-27T05:08:02.195174+00:00",
+  "record_count": 7,
+  "as_of_dates": [
+    "20260326"
+  ],
+  "normalized_unit": "billion_cny",
+  "output_path": "/root/.openclaw/workspace/projects/a-share-opportunity-scanner/data/raw/market_cap_snapshot_cn.csv",
+  "decision_support_only": true
+}

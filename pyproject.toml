@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "a-share-opportunity-scanner"
+version = "0.1.0"
+description = "Decision-support A-share data refresh and lightweight scanner."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+packages = [
+    "src",
+    "src.data_provider",
+    "src.market_cap",
+    "src.scanner",
+    "src.technical",
+    "src.universe",
+]

@@ -1,0 +1,14 @@
+{
+  "total_count": 10,
+  "eligible_count": 7,
+  "excluded_count": 3,
+  "excluded_by_reason": {
+    "inactive_listing": 1,
+    "non_a_share_code": 1,
+    "st_stock": 1
+  },
+  "source_path": "/root/.openclaw/workspace/projects/a-share-opportunity-scanner/data/raw/stock_list_cn.csv",
+  "universe_output_path": "/root/.openclaw/workspace/projects/a-share-opportunity-scanner/data/derived/universe_cn.csv",
+  "index_output_path": "/root/.openclaw/workspace/projects/a-share-opportunity-scanner/data/derived/stock_index_cn.json",
+  "decision_support_only": true
+}

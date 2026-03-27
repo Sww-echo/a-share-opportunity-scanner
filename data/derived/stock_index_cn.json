@@ -1,0 +1,91 @@
+[
+  {
+    "canonicalCode": "000001.SZ",
+    "displayCode": "000001",
+    "nameZh": "平安银行",
+    "aliases": [
+      "平银"
+    ],
+    "exchange": "SZSE",
+    "board": "主板",
+    "market": "CN",
+    "assetType": "stock",
+    "active": true
+  },
+  {
+    "canonicalCode": "002594.SZ",
+    "displayCode": "002594",
+    "nameZh": "比亚迪",
+    "aliases": [
+      "比亚迪汽车"
+    ],
+    "exchange": "SZSE",
+    "board": "主板",
+    "market": "CN",
+    "assetType": "stock",
+    "active": true
+  },
+  {
+    "canonicalCode": "300750.SZ",
+    "displayCode": "300750",
+    "nameZh": "宁德时代",
+    "aliases": [
+      "宁德"
+    ],
+    "exchange": "SZSE",
+    "board": "创业板",
+    "market": "CN",
+    "assetType": "stock",
+    "active": true
+  },
+  {
+    "canonicalCode": "430047.BJ",
+    "displayCode": "430047",
+    "nameZh": "诺思兰德",
+    "aliases": [],
+    "exchange": "BSE",
+    "board": "北交所",
+    "market": "CN",
+    "assetType": "stock",
+    "active": true
+  },
+  {
+    "canonicalCode": "600030.SH",
+    "displayCode": "600030",
+    "nameZh": "中信证券",
+    "aliases": [
+      "中信"
+    ],
+    "exchange": "SSE",
+    "board": "主板",
+    "market": "CN",
+    "assetType": "stock",
+    "active": true
+  },
+  {
+    "canonicalCode": "600519.SH",
+    "displayCode": "600519",
+    "nameZh": "贵州茅台",
+    "aliases": [
+      "茅台"
+    ],
+    "exchange": "SSE",
+    "board": "主板",
+    "market": "CN",
+    "assetType": "stock",
+    "active": true
+  },
+  {
+    "canonicalCode": "688981.SH",
+    "displayCode": "688981",
+    "nameZh": "中芯国际",
+    "aliases": [
+      "中芯"
+    ],
+    "exchange": "SSE",
+    "board": "科创板",
+    "market": "CN",
+    "assetType": "stock",
+    "active": true
+  }
+]

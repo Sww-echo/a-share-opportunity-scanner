@@ -1,0 +1,21 @@
+{
+  "provider": "sample",
+  "generated_at": "2026-03-27T05:54:01.679124+00:00",
+  "record_count": 7,
+  "as_of_dates": [
+    "20260326"
+  ],
+  "evaluated_fields": [
+    "close_price_cny",
+    "prev_close_price_cny",
+    "low_price_cny",
+    "sma20_cny",
+    "sma60_cny",
+    "prev_sma20_cny",
+    "prev_sma60_cny",
+    "breakout_level_cny",
+    "volume_ratio_20d"
+  ],
+  "output_path": "/root/.openclaw/workspace/projects/a-share-opportunity-scanner/data/raw/technical_snapshot_cn.csv",
+  "decision_support_only": true
+}

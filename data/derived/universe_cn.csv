@@ -1,0 +1,11 @@
+﻿ts_code,symbol,name,exchange,board,list_status,list_date,area,industry,is_hs,is_st,eligible,exclude_reason
+000001.SZ,000001,平安银行,SZSE,主板,L,19910403,深圳,银行,S,N,Y,
+000013.SZ,000013,示例退市股,SZSE,主板,D,19930101,上海,示例,N,N,N,inactive_listing
+002594.SZ,002594,比亚迪,SZSE,主板,L,20110630,深圳,汽车,S,N,Y,
+200012.SZ,200012,南玻B,SZSE,B股,L,19920228,深圳,玻璃,N,N,N,non_a_share_code
+300750.SZ,300750,宁德时代,SZSE,创业板,L,20180611,福建,电池,S,N,Y,
+430047.BJ,430047,诺思兰德,BSE,北交所,L,20211115,北京,医药,N,N,Y,
+600030.SH,600030,中信证券,SSE,主板,L,20030106,北京,证券,N,N,Y,
+600146.SH,600146,*ST环球,SSE,主板,L,19990707,宁夏,综合,N,Y,N,st_stock
+600519.SH,600519,贵州茅台,SSE,主板,L,20010827,贵州,白酒,N,N,Y,
+688981.SH,688981,中芯国际,SSE,科创板,L,20200716,上海,半导体,N,N,Y,

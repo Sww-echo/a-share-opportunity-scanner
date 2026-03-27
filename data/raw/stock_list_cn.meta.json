@@ -1,0 +1,7 @@
+{
+  "provider": "sample",
+  "generated_at": "2026-03-27T05:08:02.194011+00:00",
+  "record_count": 10,
+  "output_path": "/root/.openclaw/workspace/projects/a-share-opportunity-scanner/data/raw/stock_list_cn.csv",
+  "decision_support_only": true
+}
