@@ -7,6 +7,7 @@
 - 市值快照层与技术快照层契约已建立
 - scanner 已支持 candidate / watch / reject
 - 已实现趋势、金叉、突破、量能确认、supported pullback、不追高等规则
+- 已实现独立排序层与 ranking tests
 - 已具备 sample/csv 端到端 flow 与测试
 
 当前项目已经是一个**可运行的轻量规则扫描器 MVP**，不是空壳，也不是纯设计稿。
@@ -30,17 +31,22 @@
 - `breakout_level_cny`
 - `volume_ratio_20d`
 
-#### 未完成
-这些字段目前主要依赖：
-- sample
-- csv
-- 人工准备的事实输入
+本轮已新增一条最小真实链路：
 
-尚未完成：
-> 从真实 OHLCV 数据自动推导并生成 technical snapshot
+- `scripts/refresh_technical_snapshot_from_ohlcv.py`
+- 本地 OHLCV CSV -> 标准 technical snapshot CSV
+- `close / prev_close / low / SMA20 / SMA60 / prev SMA20 / prev SMA60 / breakout level`
+- `volume_ratio_20d` 在输入包含 volume 时可自动计算
+
+#### 未完成
+这些字段已经不再只依赖预制 sample snapshot 行，但仍未完成：
+
+- 仓库内自动抓取远程 OHLCV
+- 更稳定的 technical provider 组合 / fallback
+- 让一键 flow 直接吃原始 OHLCV 而不经过预处理步骤
 
 #### 影响
-没有真实 technical snapshot，scanner 虽然能跑，但仍主要处于“结构已成、真实技术事实未完全打通”的状态。
+本地真实 OHLCV 已经可以把 scanner 主体和技术事实打通，但“可日更、可自动供应”的真实技术事实层仍未完全补齐。
 
 ---
 
@@ -88,22 +94,24 @@
 
 ---
 
-### P1：结果排序与人工复核体验
+### P1：复核输出的跨日对比 / blocker 聚合
 #### 当前已有
 - `score`
 - `reason`
 - `signal_reasons`
 - `risk_flags`
 - `candidate/watch/reject`
+- 独立排序层
+- `ranking_model`
+- text formatter / human-readable review 输出
 
 #### 未完成
-- 更精细的候选排序逻辑
-- 同分情况下的优先级解释
-- 更适合人看的中文摘要
-- 对“为什么只是 watch 不是 candidate”的更直接表述
+- 同一标的相对上一轮扫描的状态变化摘要
+- watch/reject bucket 中 blocker 的更强聚合视图
+- 更直接回答“为什么还是 watch / 为什么被打回 reject”的批量归因对比
 
 #### 目标
-让输出不仅“工程上可读”，也“交易复核时可直接使用”。
+让人工复核不仅能看“当前排序结果”，也能快速看出“今天相对昨天发生了什么变化”。
 
 ---
 
@@ -144,7 +152,7 @@
 补真实市值快照替代源 / fallback 方案
 
 ### Step 3
-优化结果排序、候选说明、风险表达
+如果继续暂缓 snapshot-layer 扩张，优先做风险降级细化与跨日 diff 复核
 
 ### Step 4
 把定时任务 / skill / 日常交互切到新项目
@@ -160,3 +168,4 @@
 - 真实 technical snapshot
 - 真实市值快照
 - 真实事实层的稳定供应链
+- 风险细化与跨日人工复核

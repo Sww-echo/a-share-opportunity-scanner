@@ -39,21 +39,32 @@
     - `prev_sma60_cny`
     - `breakout_level_cny`
     - `volume_ratio_20d`
-  - 新增字段仍然是显式事实输入，不在仓库内自动回算
+- `scripts/refresh_technical_snapshot_from_ohlcv.py`
+  - 新增本地 OHLCV CSV -> technical snapshot 的最小真实链路
+  - 当前支持从本地 `ts_code/trade_date/high/low/close/(volume)` 历史自动推导 scanner 已依赖的技术字段
+  - `breakout_level_cny` 当前定义为“不含最新日的前 20 个交易日最高价”
+  - `volume_ratio_20d` 当前定义为“最新成交量 / 前 20 个交易日平均成交量”；如果输入没有 volume，则该字段留空
+  - 产出标准化技术快照 CSV 和 metadata JSON
 - `scripts/run_daily_scan.py`
   - 读取已构建的 universe CSV、市值快照 CSV、技术快照 CSV
-  - 当前明确实现 9 条规则：
+  - 当前明确实现一组计分/过滤规则，且 crossover / breakout 结果都进一步细化为显式状态：
     - `total_market_cap_billion_cny` 是否进入 `candidate_band`
     - `close_price_cny >= sma20_cny`
     - `sma20_cny >= sma60_cny`
-    - `prev_sma20_cny <= prev_sma60_cny && sma20_cny >= sma60_cny`
-    - `close_price_cny >= breakout_level_cny`
+    - `prev_sma20_cny <= prev_sma60_cny && sma20_cny > sma60_cny`；如果今日 `sma20_cny == sma60_cny`，会显式记为 `touching_sma60`，而不是 fresh crossover；如果均线上穿已出现但收盘没有高于前收，则显式记为 `crossed_but_close_not_above_prev_close`；如果缺少 `prev_close_price_cny`，则显式记为 `missing_price_confirmation_context`
+    - `prev_close_price_cny < breakout_level_cny <= close_price_cny`；昨收已在 `breakout_level_cny` 上方时显式记为 `stale_above_breakout`，昨收在上方但今收回下方时显式记为 `failed_breakout`
     - 当 breakout 被用作触发时，`volume_ratio_20d >= min_breakout_volume_ratio`
     - `low_price_cny` 是否在 `SMA20` 容忍带内测试支撑、且 `close_price_cny >= sma20_cny`
     - 当 supported pullback 被用作触发时，`close_price_cny <= prev_close_price_cny` 且 `volume_ratio_20d <= max_pullback_volume_ratio`
     - `close_price_cny <= sma20_cny * (1 + max_close_above_sma20_ratio)`
   - 输出 `candidate / watch / reject` 三类结果
   - 输出透明分数、逐条规则状态、`signal_reasons` 和 `risk_flags`，便于样例 / CSV 工作流人工复核
+  - 当前扫描结果会再经过独立排序层：先看 `decision`，再看 `major risk tier`、`score`、confirmed trigger mix、trigger freshness/quality、`risk_flags` 数量与流动性代理
+  - `daily_scan_summary_cn.json` 当前也会输出 `ranking_model`，把排序维度显式暴露出来
+  - 当前 stdout 已切到 text review formatter：按 `candidate/watch/reject` 分组展示排序结果，并把 `reason`、`signal_reasons`、`risk_flags` 与 ranking tier 一起压缩成可快速人工复核的摘要
+  - text review 当前会按 bucket 聚合 `Top reasons / Top signals / Top risks`，帮助先看主要正向确认和阻塞点
+  - 支持 `--text-summary-limit-per-decision` 控制每个 bucket 展示多少条排序结果，支持 `0` 表示展示全部
+  - 支持 `--text-summary-output` 额外把这份人工复核摘要落地为纯文本文件，同时保留原有 CSV/JSON 输出
   - 仅做决策支持输出，不产生任何交易执行动作
 - `scripts/run_rule_based_flow.py`
   - 新增一键端到端 CLI，顺序执行：
@@ -77,10 +88,15 @@
   - 为未来真实 provider 保留清晰扩展点
 - `src/scanner/`
   - 定义 `RuleBasedScanConfig`、`DailyScanRecord`、`DailyScanResult`
+  - 新增 `src/scanner/config.py`，统一收敛 scanner 阈值默认值、summary threshold 导出，以及 CLI 参数装配
   - 提供 `RuleBasedScanner`
+  - 新增 `src/scanner/rules.py`、`src/scanner/reason_builder.py`、`src/scanner/record_builder.py`，把规则状态计算、reason/signal/risk 组装、record 构建从 engine 中拆出
+  - 新增 `src/scanner/ranking.py`，把排序逻辑从 scanner engine 中拆出
+  - 新增 `src/scanner/formatter.py`，把“面向人工的 review 输出”从 CLI 中拆出，保持轻量、显式、可单元测试
   - 当前评分模型固定且透明：
     - `candidate_band` = `2`
     - `watch_band` = `1`
+    - `circulating_market_cap_liquidity` = `1`
     - `close >= sma20` = `1`
     - `sma20 >= sma60` = `1`
     - `confirmed_sma20_cross` = `1`
@@ -88,13 +104,21 @@
     - `breakout_volume_confirmation` = `1`
     - `supported_pullback_confirmation` = `1`
     - `pullback_volume_contraction` = `1`
+    - `fresh_supported_pullback_entry` = `1`
     - `no_chase_guard` = `1`
+    - 满分 `12`
   - 当前 `candidate` 判定必须同时满足：
     - 市值进入 `candidate_band`
     - `close >= sma20`
     - `sma20 >= sma60`
-    - 金叉确认成立，或 breakout 确认同时通过量能确认，或 supported pullback 确认同时通过回踩量能约束
+    - 金叉确认成立（当前还要求 crossover 当日 `close_price_cny > prev_close_price_cny`），或 fresh breakout 确认同时通过量能确认，或 supported pullback 确认同时通过回踩量能约束
+    - 若同日出现 `failed_breakout`，即使 supported pullback 也成立，当前仍保持 `watch`
     - 不触发“不追高”保护
+  - 当前排序层显式遵循：
+    - `candidate > watch > reject`
+    - hard reset / structural risk 先降序列位，再比较 `score`
+    - 同分时比较 confirmed trigger 数量与语义：`supported_pullback > volume_backed_breakout > confirmed_crossover`
+    - 再比较 freshness / quality、`risk_flags` 数量和流动性代理
   - 把 universe、市场事实快照、技术事实快照显式分层
 - `src/technical/`
   - 定义 `TechnicalSnapshotRecord` 数据结构
@@ -112,7 +136,8 @@
 以下内容还没有进入第一版基础设施：
 
 - 真实历史行情 / OHLCV 获取
-- 从价格历史自动计算技术指标（当前只读取外部准备好的技术快照）
+- 更稳定的远程 technical provider / fallback / 缓存策略
+- 让一键 flow 直接吃原始 OHLCV 而不是先生成 technical snapshot
 - 更丰富的量价确认、RSI/MACD、波动率等技术规则
 - 更完整的候选评分、风险提示、操作模板
 - LLM 解释层
@@ -145,6 +170,10 @@
 - `data/derived/daily_scan_cn.csv`
 - `data/derived/daily_scan_summary_cn.json`
 
+可选输出：
+
+- 通过 `--text-summary-output` 生成的人工复核文本摘要，例如 `daily_scan_review.txt`
+
 如果通过 `scripts/run_rule_based_flow.py --data-root /path/to/run-data` 运行，同样会在对应的 `/path/to/run-data/raw` 和 `/path/to/run-data/derived` 下生成同名文件。
 
 ## 已验证流程
@@ -170,5 +199,5 @@
 
 - 补真实 OHLCV / 指标生成链路
 - 在 scanner 层继续增加可复现规则
-- 在现有透明评分与显式 reason bundle 之上，再考虑人工复核报告
+- 在现有 text review formatter 之上，继续细化 watch/reject 的阻塞原因聚合与跨日变化对比
 - 继续明确保持“不通知、不调度、不自动下单”的边界

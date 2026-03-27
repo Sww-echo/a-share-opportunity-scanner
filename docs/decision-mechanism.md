@@ -33,8 +33,10 @@
 - 市值进入 `candidate_band` 或 `watch_band`
 - 收盘价是否站上 `SMA20`
 - `SMA20` 是否高于 `SMA60`
-- `SMA20` 是否刚刚上穿 `SMA60`
-- 收盘价是否站上预先准备的 `breakout_level`
+- `SMA20` 是否刚刚明确上穿 `SMA60`
+- 当 `SMA20` 刚刚上穿 `SMA60` 时，当日收盘是否也高于前收，用于确认这次 crossover 不是“均线刚翻上去但价格日内并不强”
+- 是否形成 fresh breakout：`prev_close_price_cny < breakout_level_cny <= close_price_cny`
+- 如果价格已在 `breakout_level` 上方但不是当日新触发，或突破后又收回下方，会显式输出 stale / failed breakout 状态
 - 如果 breakout 被当作入场触发，`volume_ratio_20d` 是否达到配置下限
 - 是否形成“回踩 `SMA20` 获得支撑”的显式事实
 - 如果 supported pullback 被当作入场触发，`volume_ratio_20d` 是否没有高于回踩量能上限
@@ -80,16 +82,19 @@ LLM 不负责：
 ## 4.1 当前实现的实际分类方式
 
 - `candidate`：市值进入 `candidate_band`，`close >= sma20`、`sma20 >= sma60` 成立，且满足下列任一路径，同时不过度偏离 `SMA20`
-  - `SMA20/SMA60` 金叉确认
-  - `breakout_level` 突破确认并伴随 `volume_ratio_20d` 达标
+  - `SMA20/SMA60` 金叉确认；只有当日 `sma20_cny > sma60_cny` 才算 fresh cross，若只是相等会显式记为 `touching_sma60`
+  - fresh crossover 当前还要求 `close_price_cny > prev_close_price_cny`；若没有高于前收，会显式保留为 watch-only 的 crossover 弱确认状态
+  - fresh breakout 突破确认并伴随 `volume_ratio_20d` 达标
   - `SMA20` 回踩支撑确认并伴随 `volume_ratio_20d` 不高于回踩上限
-- `watch`：市值至少进入 `watch_band`，但技术趋势过滤、触发确认、回踩质量确认或“不追高”保护仍有缺口
+  - 若同日已经出现 `failed_breakout`，即使 supported pullback 也成立，当前仍保持 `watch`
+- `watch`：市值至少进入 `watch_band`，但技术趋势过滤、触发确认、回踩质量确认、breakout failure 重置或“不追高”保护仍有缺口
 - `reject`：缺少市值快照，或市值低于 `watch_band`
 
 当前透明分数：
 
 - `candidate_band = 2`
 - `watch_band = 1`
+- `circulating_market_cap_liquidity = 1`
 - `close >= sma20 = 1`
 - `sma20 >= sma60 = 1`
 - `confirmed_sma20_cross = 1`
@@ -97,15 +102,21 @@ LLM 不负责：
 - `breakout_volume_confirmation = 1`
 - `supported_pullback_confirmation = 1`
 - `pullback_volume_contraction = 1`
+- `fresh_supported_pullback_entry = 1`
 - `no_chase_guard = 1`
-- 满分 `10`
+- 满分 `12`
 
 说明：
 
 - 这个分数当前用于排序和解释，不会触发自动交易
+- 当前排序不是只看 `score`；scanner 会再经过一层显式 ranking layer，按 decision、major risk、score、trigger 语义、freshness、risk_flags、流动性代理依次排序，详见 [docs/ranking-policy.md](/root/.openclaw/workspace/projects/a-share-opportunity-scanner/docs/ranking-policy.md)
 - 当前技术规则来自外部准备好的技术快照 CSV，而不是仓库内自动回算整段价格历史
 - 旧版只含 `close/sma20/sma60` 的技术快照仍兼容，但在当前阶段规则下会因为缺少触发确认上下文而更倾向进入 `watch`
+- 如果缺少 `prev_close_price_cny`，breakout 也不会被当作 fresh trigger 使用，而是显式退回 `missing` 上下文
+- 如果 `SMA20` 只是触到 `SMA60`、没有真正收在其上方，当前只会输出 `touching_sma60`，不会计作 fresh crossover trigger
+- 如果 `SMA20` 当日已经上穿 `SMA60`，但 `close_price_cny` 没有高于 `prev_close_price_cny`，当前也不会计作 fresh crossover trigger，而会显式输出 crossover 价格确认不足状态
 - breakout / pullback 的量能确认当前只消费已准备好的 `volume_ratio_20d` 事实，不会在仓库内引入新的付费行情权限或自动执行逻辑
+- breakout failure 当前被当作更强的降级信号；即使当天也出现 supported pullback 恢复，scanner 仍会把它保留在 `watch`
 - 当前输出除了主 `reason` 之外，还会额外返回 `signal_reasons` 与 `risk_flags`，把候选确认与降级原因拆开表达
 
 ## 5. 后续演进

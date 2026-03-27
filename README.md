@@ -12,9 +12,13 @@
 - 静态股票索引导出
 - 市值快照刷新流程
 - 技术快照刷新流程（示例 / CSV）
-- 日扫描入口：`candidate / watch / reject` + 透明分数输出
+- 本地 OHLCV CSV -> technical snapshot 生成链路
+- 日扫描入口：`candidate / watch / reject` + 透明分数输出 + 显式排序层
+- 面向人工复核的 text formatter：默认 stdout 展示分组排序摘要，可选落地为 `.txt`
 - 一键端到端 CLI：可直接从 `sample` / `csv` 输入跑完整规则流
 - 明确的已实现 / TODO 文档
+
+当前排序策略见 [docs/ranking-policy.md](/root/.openclaw/workspace/projects/a-share-opportunity-scanner/docs/ranking-policy.md)。
 
 ## 快速开始
 
@@ -47,7 +51,25 @@ python3 scripts/refresh_stock_list.py --provider sample
 python3 scripts/build_stock_index.py
 python3 scripts/refresh_market_cap_snapshot.py --provider sample
 python3 scripts/refresh_technical_snapshot.py --provider sample
+python3 scripts/refresh_technical_snapshot_from_ohlcv.py --input /path/to/ohlcv.csv
 python3 scripts/run_daily_scan.py
+```
+
+`run_daily_scan.py` 和 `run_rule_based_flow.py` 现在默认都会在 stdout 打印一版按 `candidate/watch/reject` 分组、按当前 ranking semantics 排序后的人工复核摘要。每个 bucket 会先聚合 `Top reasons / Top signals / Top risks`，默认展示前 `5` 条排序结果；如果要看全部排序结果：
+
+```bash
+python3 scripts/run_daily_scan.py --text-summary-limit-per-decision 0
+```
+
+如果希望把同样的人工复核摘要落地成文本文件：
+
+```bash
+python3 scripts/run_daily_scan.py \
+  --text-summary-output /tmp/daily_scan_review.txt
+
+python3 scripts/run_rule_based_flow.py \
+  --data-root /tmp/a-share-scan-run \
+  --text-summary-output /tmp/a-share-scan-run/daily_scan_review.txt
 ```
 
 输出文件默认位于：
@@ -64,6 +86,10 @@ python3 scripts/run_daily_scan.py
 - `data/derived/daily_scan_cn.csv`
 - `data/derived/daily_scan_summary_cn.json`
 
+可选输出：
+
+- 通过 `--text-summary-output` 额外生成人工复核文本摘要，例如 `daily_scan_review.txt`
+
 如果要只运行分步版并接入你自己的 CSV：
 
 ```bash
@@ -73,6 +99,19 @@ python3 scripts/refresh_market_cap_snapshot.py --provider csv --input /path/to/m
 python3 scripts/refresh_technical_snapshot.py --provider csv --input /path/to/technical_snapshot.csv
 python3 scripts/run_daily_scan.py --min-total-market-cap-bn 150
 ```
+
+如果你手里是本地 OHLCV 历史，而不是已经算好的 technical snapshot，也可以先生成标准技术快照，再复用现有 scanner：
+
+```bash
+python3 scripts/refresh_technical_snapshot_from_ohlcv.py \
+  --input /path/to/ohlcv.csv \
+  --output /tmp/technical_snapshot_cn.csv
+
+python3 scripts/run_daily_scan.py \
+  --technical-input /tmp/technical_snapshot_cn.csv
+```
+
+输入合约和计算语义见 [docs/technical-snapshot-from-ohlcv.md](docs/technical-snapshot-from-ohlcv.md)。
 
 `refresh_stock_list.py` 和 `refresh_market_cap_snapshot.py` 现在都单独支持可选 Tushare provider，但当前“一键端到端”流刻意只覆盖 `sample/csv`，以保持无 token、可复现、可本地验证。
 
@@ -150,9 +189,16 @@ python3 scripts/refresh_market_cap_snapshot.py --provider tushare --trade-date 2
 - `volume_ratio_20d`
 - `as_of_date`
 
+本地 OHLCV 转换脚本当前支持：
+
+- 必需列：`ts_code`、`trade_date`/`date`、`high`、`low`、`close`
+- 可选列：`symbol`/`code`、`name`、`volume`/`vol`
+- `breakout_level_cny` 当前定义为“不含最新日的前 20 个交易日最高价”
+- `volume_ratio_20d` 当前定义为“最新成交量 / 前 20 个交易日平均成交量”；如果输入没有 volume，这个字段会留空
+
 说明：
 
-- `prev_close_price_cny` 用于把“上涨突破”和“回踩整理”区分成显式事实，而不是在 scanner 里猜测日内语境
+- `prev_close_price_cny` 用于把“fresh breakout / stale breakout / breakout failure”和“回踩整理”区分成显式事实，而不是在 scanner 里猜测日内语境
 - `low_price_cny` 用于显式判断是否真的回踩 / 测试了 `SMA20` 支撑，给下一批 pullback 规则留出清晰合约
 - `prev_sma20_cny` / `prev_sma60_cny` 用于显式判断 `SMA20` 是否刚刚上穿 `SMA60`
 - `breakout_level_cny` 是外部准备好的突破参考位，当前通常可理解为近 20 日高点或平台压力位
@@ -163,17 +209,23 @@ python3 scripts/refresh_market_cap_snapshot.py --provider tushare --trade-date 2
 
 - 市值带宽规则：`candidate_band = total_market_cap_billion_cny >= 阈值`
 - 市值观察带：`watch_band = total_market_cap_billion_cny >= 阈值 * (1 - watch_buffer_ratio)`
+- 流动性代理规则：`circulating_market_cap_billion_cny >= min_circulating_market_cap_billion_cny` 才能进入 `candidate`，默认阈值 `30 bn`，并共享同一套 `watch_buffer_ratio`
 - 趋势规则 1：`close_price_cny >= sma20_cny`
 - 趋势规则 2：`sma20_cny >= sma60_cny`
-- 触发规则 1：`prev_sma20_cny <= prev_sma60_cny && sma20_cny >= sma60_cny`
-- 触发规则 2：`close_price_cny >= breakout_level_cny`
+- 触发规则 1：fresh `SMA20/SMA60` 金叉要求 `prev_sma20_cny <= prev_sma60_cny && sma20_cny > sma60_cny`
+- 金叉新鲜度语义：如果今日 `sma20_cny == sma60_cny`，则显式记为 `touching_sma60`，表示刚触及但尚未真正站上，不会被当作 fresh crossover trigger
+- 金叉价格确认语义：当日均线真正上穿后，还要求 `close_price_cny > prev_close_price_cny` 才记为 `confirmed_bullish_cross`；如果收盘没有强于前收，会显式记为 `crossed_but_close_not_above_prev_close`；如果缺少 `prev_close_price_cny`，则显式记为 `missing_price_confirmation_context`
+- 触发规则 2：fresh breakout，要求 `prev_close_price_cny < breakout_level_cny <= close_price_cny`
+- breakout 新鲜度 / 失败语义：如果 `close_price_cny >= breakout_level_cny` 但 `prev_close_price_cny >= breakout_level_cny`，则显式记为 `stale_above_breakout`；如果昨日已在 breakout level 上方但今日收回下方，则显式记为 `failed_breakout`
 - breakout 量能确认：当 breakout 被当作入场触发时，要求 `volume_ratio_20d >= min_breakout_volume_ratio`，默认下限 `1.2`
 - 回踩支撑确认：`low_price_cny` 在 `SMA20` 容忍带内测试支撑，`close_price_cny >= sma20_cny`，且 `close_price_cny <= prev_close_price_cny`
 - 回踩量能约束：当 supported pullback 被当作入场触发时，要求 `volume_ratio_20d <= max_pullback_volume_ratio`，默认上限 `1.0`
+- 回踩触发新鲜度：当 supported pullback 被当作入场触发时，`close_price_cny` 还必须不高于 `sma20_cny * (1 + max_pullback_close_above_sma20_ratio)`，默认上限 `2%`
 - 不追高保护：`close_price_cny <= sma20_cny * (1 + max_close_above_sma20_ratio)`，默认上限 `5%`
 - 透明分数：
   - `candidate_band=2`
   - `watch_band=1`
+  - `circulating_market_cap_liquidity=1`
   - `close>=sma20=1`
   - `sma20>=sma60=1`
   - `confirmed_sma20_cross=1`
@@ -181,35 +233,46 @@ python3 scripts/refresh_market_cap_snapshot.py --provider tushare --trade-date 2
   - `breakout_volume_confirmation=1`
   - `supported_pullback_confirmation=1`
   - `pullback_volume_contraction=1`
+  - `fresh_supported_pullback_entry=1`
   - `no_chase_guard=1`
-  - 满分 `10`
+  - 满分 `12`
 
 当前分类逻辑：
 
-- `candidate`：市值进入 `candidate_band`，趋势双确认通过，且满足下列任一路径，同时不过度偏离 `SMA20`
+- `candidate`：总市值进入 `candidate_band`、流通市值流动性代理通过、趋势双确认通过，且满足下列任一路径，同时不过度偏离 `SMA20`
   - `SMA20/SMA60` 金叉确认
-  - `breakout_level` 突破确认，并且 `volume_ratio_20d` 达到量能下限
-  - `SMA20` 支撑回踩确认，并且 `volume_ratio_20d` 没有高于回踩量能上限
+  - fresh breakout 站上 `breakout_level`，并且 `volume_ratio_20d` 达到量能下限
+  - `SMA20` 支撑回踩确认，`volume_ratio_20d` 没有高于回踩量能上限，且收盘仍然贴近 `SMA20`
+  - 但如果同一天出现 `failed_breakout`，即使也满足 supported pullback 质量约束，当前仍只会停留在 `watch`，等待 breakout failure 影响先重置
 - `watch`：市值至少进入 `watch_band`，但仍有任一候选条件未满足，例如：
   - 只在 `watch_band`
+  - 总市值已过线，但 `circulating_market_cap_billion_cny` 只在流动性 watch band，或缺失该流动性上下文
   - 趋势过滤未通过
+  - `SMA20` 只是刚好触到 `SMA60`，但还没有真正站上，当前金叉触发不够新鲜
+  - `SMA20` 虽然当日上穿了 `SMA60`，但收盘没有高于前收，当前金叉缺少价格确认
+  - `SMA20` 虽然当日上穿了 `SMA60`，但缺少 `prev_close_price_cny`，当前金叉价格确认上下文不完整
   - 缺少金叉 / breakout / supported pullback 触发确认
-  - breakout 已出现，但缺少量能确认或量能不足
+  - fresh breakout 已出现，但缺少量能确认或量能不足
+  - 价格虽然仍在 `breakout_level` 上方，但该 breakout 已不是当日新触发
+  - 刚突破后又收回 `breakout_level` 下方，触发 breakout failure 降级
+  - failed breakout 当天虽然又回到 `SMA20` 附近获得支撑，也只会显式记为 recovery watch，而不会直接升回 `candidate`
   - 回踩支撑已出现，但缺少量能收敛上下文，或回踩伴随放量压力
+  - 回踩虽然测试了 `SMA20`，但收盘反弹得离 `SMA20` 太远，当前 pullback trigger 已不够新鲜
   - 回踩过程中跌破 / 明显下刺 `SMA20`，触发风险降级
   - 触发满足但触发后已经过度偏离 `SMA20`，触发“不追高”降级
-- `reject`：缺少市值快照，或市值低于 `watch_band`
+- `reject`：缺少市值快照，或总市值 / 流通市值流动性代理低于各自的 `watch_band`
 
 当前扫描输出除了主 `reason` 之外，还会附带两组显式解释字段：
 
-- `signal_reasons`：已经成立的正向确认码，例如 `breakout_volume_confirmed`
+- `signal_reasons`：已经成立的正向确认码 / 构造性恢复码，例如 `fresh_breakout_level_cleared`、`failed_breakout_recovered_at_sma20_support`
 - `risk_flags`：导致降级、等待或拒绝的风险 / 缺口码，例如 `pullback_volume_above_threshold`
 
 说明：
 
-- 当前 scanner 读取的是“已经算好的技术快照 CSV”，不会自己抓取历史 K 线，也不会在仓库内回补真实行情
+- 当前 scanner 读取的仍然是“已经算好的技术快照 CSV”；本轮新增的是一个本地 OHLCV -> technical snapshot 预处理脚本，而不是让 scanner 在运行时自己抓取 / 回算历史行情
 - 技术快照允许部分字段留空；缺失字段会显式体现为 `missing` 规则状态
 - 旧版最小技术快照（只有 `close/sma20/sma60`）仍然兼容，但在当前阶段规则下通常只能进入 `watch`，直到补齐触发确认所需的上下文
+- `circulating_market_cap_billion_cny` 当前被当作低成本流动性代理，而不是成交额/换手率的完整替代
 - `volume_ratio_20d` 当前只服务于 breakout / pullback 质量确认，不会把项目扩展成自动量化执行系统
 - 统一归一化后再扫描：市值用 `billion_cny`，技术数值用 `cny`
 - 后续如接入 Tushare / Akshare / 其他 provider，只需先适配到这两份标准 CSV 合约
@@ -221,6 +284,7 @@ python3 scripts/refresh_market_cap_snapshot.py --provider tushare --trade-date 2
 - `scripts/build_stock_index.py`
 - `scripts/refresh_market_cap_snapshot.py`
 - `scripts/refresh_technical_snapshot.py`
+- `scripts/refresh_technical_snapshot_from_ohlcv.py`
 - `scripts/run_daily_scan.py`
 - `scripts/run_rule_based_flow.py`
 - `src/data_provider/`
@@ -232,6 +296,7 @@ python3 scripts/refresh_market_cap_snapshot.py --provider tushare --trade-date 2
 - `data/seeds/sample_market_cap_snapshot_cn.csv`
 - `data/seeds/sample_technical_snapshot_cn.csv`
 - `docs/implementation-status.md`
+- `docs/technical-snapshot-from-ohlcv.md`
 
 ## 当前明确不做
 

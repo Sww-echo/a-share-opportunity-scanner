@@ -15,10 +15,13 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.data_provider import create_stock_list_provider, write_stock_list
 from src.market_cap import create_market_cap_snapshot_provider, write_market_cap_snapshot
 from src.scanner import (
-    DECISION_SEQUENCE,
     SCAN_RESULT_FIELDNAMES,
-    RuleBasedScanConfig,
     RuleBasedScanner,
+    add_rule_based_scan_arguments,
+    add_text_summary_arguments,
+    build_scan_config_from_args,
+    format_daily_scan_text_summary,
+    validate_text_summary_limit,
 )
 from src.technical import create_technical_snapshot_provider, write_technical_snapshot
 from src.universe import (
@@ -90,56 +93,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Keep ST stocks in the eligible universe.",
     )
-    parser.add_argument(
-        "--min-total-market-cap-bn",
-        type=float,
-        default=100.0,
-        help="Candidate threshold in billion CNY. Default: 100.0.",
-    )
-    parser.add_argument(
-        "--watch-buffer-ratio",
-        type=float,
-        default=0.2,
-        help=(
-            "Percentage band below the candidate threshold that becomes watch "
-            "instead of reject. Default: 0.2."
-        ),
-    )
-    parser.add_argument(
-        "--max-close-above-sma20-ratio",
-        type=float,
-        default=0.05,
-        help=(
-            "Maximum allowed close premium above SMA20 before the no-chase guard "
-            "downgrades the setup to watch. Default: 0.05."
-        ),
-    )
-    parser.add_argument(
-        "--min-breakout-volume-ratio",
-        type=float,
-        default=1.2,
-        help=(
-            "Minimum volume_ratio_20d needed before a breakout can qualify as an "
-            "entry trigger. Default: 1.2."
-        ),
-    )
-    parser.add_argument(
-        "--support-touch-tolerance-ratio",
-        type=float,
-        default=0.01,
-        help=(
-            "Maximum distance around SMA20 that still counts as an explicit support "
-            "retest for pullback rules. Default: 0.01."
-        ),
-    )
-    parser.add_argument(
-        "--max-pullback-volume-ratio",
-        type=float,
-        default=1.0,
-        help=(
-            "Maximum volume_ratio_20d allowed when a supported pullback is used as "
-            "the entry trigger. Default: 1.0."
-        ),
+    add_rule_based_scan_arguments(parser)
+    add_text_summary_arguments(
+        parser,
+        output_help="Optional human-readable text review output path for the daily scan.",
     )
 
     args = parser.parse_args(argv)
@@ -150,6 +107,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--market-cap-input is required when --market-cap-provider=csv")
     if args.technical_provider == "csv" and args.technical_input is None:
         parser.error("--technical-input is required when --technical-provider=csv")
+    validate_text_summary_limit(parser, args)
 
     return args
 
@@ -285,14 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
     )
 
-    config = RuleBasedScanConfig(
-        min_total_market_cap_billion_cny=args.min_total_market_cap_bn,
-        watch_buffer_ratio=args.watch_buffer_ratio,
-        max_close_above_sma20_ratio=args.max_close_above_sma20_ratio,
-        min_breakout_volume_ratio=args.min_breakout_volume_ratio,
-        support_touch_tolerance_ratio=args.support_touch_tolerance_ratio,
-        max_pullback_volume_ratio=args.max_pullback_volume_ratio,
-    )
+    config = build_scan_config_from_args(args)
     scan_result = RuleBasedScanner(config).scan(
         universe_records=universe_result.records,
         market_cap_records=market_cap_records,
@@ -341,17 +292,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(
         "stage 5/5 daily scan:"
-        f" thresholds=candidate>={config.min_total_market_cap_billion_cny:.2f} bn,"
-        f" watch>={config.watch_floor_billion_cny:.2f} bn,"
-        f" max_close_above_sma20={config.max_close_above_sma20_ratio:.2%},"
-        f" breakout_volume>={config.min_breakout_volume_ratio:.2f}x"
+        f" thresholds={', '.join(config.threshold_summary_parts())}"
     )
-    for decision in DECISION_SEQUENCE:
-        count = sum(1 for record in scan_result.records if record.decision == decision)
-        print(f"  - {decision}: {count}")
-    print(f"scan output: {scan_output}")
-    print(f"scan summary output: {scan_summary_output}")
-    print("mode: decision-support only")
+    text_summary = format_daily_scan_text_summary(
+        scan_result,
+        config,
+        technical_snapshot_row_count=len(technical_records),
+        csv_output_path=str(scan_output),
+        summary_output_path=str(scan_summary_output),
+        text_output_path=(
+            str(args.text_summary_output) if args.text_summary_output is not None else None
+        ),
+        limit_per_decision=args.text_summary_limit_per_decision,
+    )
+    if args.text_summary_output is not None:
+        args.text_summary_output.parent.mkdir(parents=True, exist_ok=True)
+        args.text_summary_output.write_text(text_summary, encoding="utf-8")
+    print(text_summary, end="")
     return 0
 
 

@@ -4,6 +4,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from .config import RuleBasedScanConfig
+
 DECISION_SEQUENCE = ("candidate", "watch", "reject")
 SCAN_RESULT_FIELDNAMES = (
     "ts_code",
@@ -27,6 +29,7 @@ SCAN_RESULT_FIELDNAMES = (
     "score",
     "max_score",
     "market_cap_rule",
+    "circulating_market_cap_rule",
     "close_vs_sma20_rule",
     "sma20_vs_sma60_rule",
     "sma20_crossover_rule",
@@ -34,6 +37,7 @@ SCAN_RESULT_FIELDNAMES = (
     "breakout_volume_rule",
     "pullback_support_rule",
     "pullback_volume_rule",
+    "pullback_freshness_rule",
     "no_chase_rule",
     "decision",
     "reason",
@@ -52,38 +56,6 @@ def _format_integer(value: int) -> str:
 
 def _format_codes(values: tuple[str, ...]) -> str:
     return "|".join(values)
-
-
-@dataclass(frozen=True, slots=True)
-class RuleBasedScanConfig:
-    min_total_market_cap_billion_cny: float = 100.0
-    watch_buffer_ratio: float = 0.2
-    max_close_above_sma20_ratio: float = 0.05
-    min_breakout_volume_ratio: float = 1.2
-    support_touch_tolerance_ratio: float = 0.01
-    max_pullback_volume_ratio: float = 1.0
-
-    def __post_init__(self) -> None:
-        if self.min_total_market_cap_billion_cny <= 0:
-            raise ValueError("min_total_market_cap_billion_cny must be positive")
-        if not 0 <= self.watch_buffer_ratio < 1:
-            raise ValueError("watch_buffer_ratio must be between 0 and 1")
-        if self.max_close_above_sma20_ratio < 0:
-            raise ValueError("max_close_above_sma20_ratio must be non-negative")
-        if self.min_breakout_volume_ratio <= 0:
-            raise ValueError("min_breakout_volume_ratio must be positive")
-        if self.support_touch_tolerance_ratio < 0:
-            raise ValueError("support_touch_tolerance_ratio must be non-negative")
-        if self.max_pullback_volume_ratio <= 0:
-            raise ValueError("max_pullback_volume_ratio must be positive")
-
-    @property
-    def watch_floor_billion_cny(self) -> float:
-        return self.min_total_market_cap_billion_cny * (1 - self.watch_buffer_ratio)
-
-    @property
-    def max_score(self) -> int:
-        return 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +81,7 @@ class DailyScanRecord:
     score: int
     max_score: int
     market_cap_rule: str
+    circulating_market_cap_rule: str
     close_vs_sma20_rule: str
     sma20_vs_sma60_rule: str
     sma20_crossover_rule: str
@@ -116,6 +89,7 @@ class DailyScanRecord:
     breakout_volume_rule: str
     pullback_support_rule: str
     pullback_volume_rule: str
+    pullback_freshness_rule: str
     no_chase_rule: str
     decision: str
     reason: str
@@ -149,6 +123,7 @@ class DailyScanRecord:
             "score": _format_integer(self.score),
             "max_score": _format_integer(self.max_score),
             "market_cap_rule": self.market_cap_rule,
+            "circulating_market_cap_rule": self.circulating_market_cap_rule,
             "close_vs_sma20_rule": self.close_vs_sma20_rule,
             "sma20_vs_sma60_rule": self.sma20_vs_sma60_rule,
             "sma20_crossover_rule": self.sma20_crossover_rule,
@@ -156,6 +131,7 @@ class DailyScanRecord:
             "breakout_volume_rule": self.breakout_volume_rule,
             "pullback_support_rule": self.pullback_support_rule,
             "pullback_volume_rule": self.pullback_volume_rule,
+            "pullback_freshness_rule": self.pullback_freshness_rule,
             "no_chase_rule": self.no_chase_rule,
             "decision": self.decision,
             "reason": self.reason,
@@ -171,6 +147,8 @@ class DailyScanResult:
     eligible_universe_count: int
 
     def to_summary(self, config: RuleBasedScanConfig) -> dict[str, Any]:
+        from .ranking import describe_ranking_policy
+
         counts = Counter(record.decision for record in self.records)
         score_counts = Counter(record.score for record in self.records)
         return {
@@ -181,24 +159,13 @@ class DailyScanResult:
             "decision_counts": {
                 decision: counts.get(decision, 0) for decision in DECISION_SEQUENCE
             },
-            "thresholds": {
-                "candidate_min_total_market_cap_billion_cny": (
-                    config.min_total_market_cap_billion_cny
-                ),
-                "watch_floor_total_market_cap_billion_cny": (
-                    config.watch_floor_billion_cny
-                ),
-                "watch_buffer_ratio": config.watch_buffer_ratio,
-                "max_close_above_sma20_ratio": config.max_close_above_sma20_ratio,
-                "min_breakout_volume_ratio": config.min_breakout_volume_ratio,
-                "support_touch_tolerance_ratio": config.support_touch_tolerance_ratio,
-                "max_pullback_volume_ratio": config.max_pullback_volume_ratio,
-            },
+            "thresholds": config.summary_thresholds(),
             "score_model": {
                 "max_score": config.max_score,
                 "components": {
                     "market_cap_candidate_band": 2,
                     "market_cap_watch_band": 1,
+                    "circulating_market_cap_liquidity": 1,
                     "close_at_or_above_sma20": 1,
                     "sma20_at_or_above_sma60": 1,
                     "confirmed_sma20_sma60_bullish_crossover": 1,
@@ -206,9 +173,11 @@ class DailyScanResult:
                     "breakout_volume_confirmation": 1,
                     "supported_pullback_confirmation": 1,
                     "pullback_volume_contraction": 1,
+                    "fresh_supported_pullback_entry": 1,
                     "no_chase_guard": 1,
                 },
             },
+            "ranking_model": describe_ranking_policy(),
             "score_distribution": {
                 str(score): score_counts.get(score, 0)
                 for score in range(config.max_score + 1)
@@ -218,14 +187,17 @@ class DailyScanResult:
             ),
             "evaluated_rules": [
                 "market-cap band gate",
+                "circulating market-cap liquidity proxy: circulating_market_cap_billion_cny must meet the configured floor to qualify as candidate and drops to watch/reject when float liquidity is thin",
                 "close at or above SMA20 when technical snapshot is present",
                 "SMA20 at or above SMA60 when technical snapshot is present",
-                "fresh SMA20 bullish crossover above SMA60 when prior SMA values are present",
-                "close at or above the prepared breakout level when breakout context is present",
+                "fresh SMA20 bullish crossover above SMA60 when prior SMA values are present and the crossover day also closes above the prior close; weak or missing price confirmation is surfaced explicitly",
+                "fresh breakout confirmation: prev_close must be below the prepared breakout level and close must finish at or above it; stale-above and failed-breakout states are surfaced explicitly",
                 "breakout volume confirmation: volume_ratio_20d must meet the configured floor when breakout is used as the entry trigger",
                 "supported pullback confirmation: low tests SMA20 within tolerance, close holds above SMA20, and close is not above the prior close",
                 "pullback volume contraction: volume_ratio_20d must stay at or below the configured ceiling when supported pullback is used as the entry trigger",
+                "fresh pullback entry: after a confirmed supported pullback, close must still finish within the configured distance above SMA20 or the pullback trigger is treated as no longer fresh",
                 "no-chase guard: close must not exceed SMA20 by more than the configured ratio",
+                "ranking layer: within each decision bucket, hard reset or structural damage ranks below cleaner setups before score, then score, confirmed trigger mix, trigger freshness/quality, risk burden, and liquidity proxies break ties",
             ],
         }
 

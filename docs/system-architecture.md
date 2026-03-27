@@ -133,12 +133,17 @@
 
 #### 技术规则 3：SMA20 金叉确认
 - `confirmed_bullish_cross`
+- `touching_sma60`
+- `crossed_but_close_not_above_prev_close`
+- `missing_price_confirmation_context`
 - `already_above`
 - `fail`
 - `missing`
 
 #### 技术规则 4：breakout 确认
 - `pass`
+- `stale_above_breakout`
+- `failed_breakout`
 - `fail`
 - `missing`
 
@@ -162,7 +167,13 @@
 - `not_applicable`
 - `missing`
 
-#### 技术规则 8：不追高保护
+#### 技术规则 8：pullback 新鲜度确认
+- `pass`
+- `rebounded_too_far_above_sma20`
+- `not_applicable`
+- `missing`
+
+#### 技术规则 9：不追高保护
 - `pass`
 - `overextended`
 - `not_applicable`
@@ -174,6 +185,7 @@
 - `max_score`
 - `reason`
 - `market_cap_rule`
+- `circulating_market_cap_rule`
 - `close_vs_sma20_rule`
 - `sma20_vs_sma60_rule`
 - `sma20_crossover_rule`
@@ -181,21 +193,56 @@
 - `breakout_volume_rule`
 - `pullback_support_rule`
 - `pullback_volume_rule`
+- `pullback_freshness_rule`
 - `no_chase_rule`
 - `signal_reasons`
 - `risk_flags`
 
-### 3.5 结果输出层
+### 3.5 排序层
+当前规则扫描之后，会进入一层独立排序：
+
+- 实现位置：`src/scanner/ranking.py`
+- 输入：`DailyScanRecord`
+- 输出：同一批 record 的稳定排序结果
+
+当前排序不会重写 `candidate/watch/reject` 决策，只负责决定“谁排在前面”。
+
+当前排序维度按顺序包括：
+- `decision`
+- `major risk tier`
+- `score`
+- confirmed trigger 数量
+- confirmed trigger 语义优先级
+- trigger freshness / quality
+- `risk_flags` 数量
+- 流通市值 / 总市值
+- `symbol`
+
+这样做的目标是：
+- 不让高分但已出现 reset / structural risk 的 `watch` 排得过前
+- 让同分 `candidate/watch` 更适合人工复核
+
+### 3.6 结果输出层
 当前输出：
 - `data/derived/daily_scan_cn.csv`
 - `data/derived/daily_scan_summary_cn.json`
+- 可选 `--text-summary-output` 文本复核摘要
 
 输出内容包括：
 - candidate/watch/reject 数量
 - 每只股票的规则结果
 - 分数
+- 排序后的结果顺序
+- `ranking_model`
 - 原因
 - summary 统计
+
+当前人读输出路径也已经单独抽象为 formatter：
+- 实现位置：`src/scanner/formatter.py`
+- 输入：`DailyScanResult + RuleBasedScanConfig`
+- 输出：按 `candidate/watch/reject` 分组的文本摘要
+- 文本摘要显式复用已有 `decision`、`score`、`reason`、`signal_reasons`、`risk_flags` 和 ranking semantics，不新增第二套决策模型
+- `scripts/run_daily_scan.py` 与 `scripts/run_rule_based_flow.py` 默认都会把这份 text review 打到 stdout，并可选落地为 `.txt`
 
 ## 4. 当前决策机制
 
@@ -231,6 +278,7 @@ LLM 不负责：
 当前阶段二规则评分为：
 - `market_cap_candidate_band = 2`
 - `market_cap_watch_band = 1`
+- `circulating_market_cap_liquidity = 1`
 - `close >= SMA20 = 1`
 - `SMA20 >= SMA60 = 1`
 - `confirmed_SMA20_cross = 1`
@@ -238,14 +286,17 @@ LLM 不负责：
 - `breakout_volume_confirmation = 1`
 - `supported_pullback_confirmation = 1`
 - `pullback_volume_contraction = 1`
+- `fresh_supported_pullback_entry = 1`
 - `no_chase_guard = 1`
 
-满分：`10`
+满分：`12`
 
 这意味着：
 - 市值达到 candidate band、趋势过滤通过、触发确认到位、且不过度偏离 `SMA20`，才进入 `candidate`
-- 如果依赖 breakout 作为触发，breakout 还必须有 `volume_ratio_20d` 的量能确认
-- 如果依赖 supported pullback 作为触发，必须显式看到 `SMA20` 支撑测试、回踩日收盘不高于前收，且 `volume_ratio_20d` 不高于回踩量能上限
+- fresh crossover 只有在 `SMA20` 当日真正收在 `SMA60` 上方、且 `close_price_cny > prev_close_price_cny` 时才成立；如果只是触到同一水平，会显式输出 `touching_sma60`，如果均线上穿已出现但收盘没有强于前收，则会显式输出 crossover 价格确认不足状态
+- 如果依赖 breakout 作为触发，breakout 必须是 fresh breakout，且还必须有 `volume_ratio_20d` 的量能确认；stale / failed breakout 会被显式输出但不会当作触发
+- 如果依赖 supported pullback 作为触发，必须显式看到 `SMA20` 支撑测试、回踩日收盘不高于前收，`volume_ratio_20d` 不高于回踩量能上限，且收盘没有反弹得离 `SMA20` 太远
+- 如果同一天出现 `failed_breakout`，即使也看到 supported pullback，当前也只会保留在 `watch`，等待 breakout failure 影响先重置
 - 市值过线但趋势、触发或不追高保护任一不足，进入 `watch`
 - 市值低于 watch band 或缺少关键事实，进入 `reject`
 
