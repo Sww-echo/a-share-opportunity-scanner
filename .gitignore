@@ -11,3 +11,5 @@ data/derived/*.csv
 
 # Local review outputs
 *.txt
+
+.venv/
