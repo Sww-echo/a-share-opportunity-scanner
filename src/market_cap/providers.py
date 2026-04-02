@@ -23,6 +23,7 @@ TUSHARE_DAILY_BASIC_FIELDS = "ts_code,trade_date,total_mv,circ_mv"
 TUSHARE_TRADE_CAL_FIELDS = "cal_date,is_open"
 WAN_CNY_PER_BILLION_CNY = 100000.0
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
+YIYUAN_CNY_PER_BILLION_CNY = 10.0
 
 
 def _clean(value: object | None) -> str | None:
@@ -40,6 +41,7 @@ def _clean_float(value: object | None) -> float | None:
     if text is None:
         return None
 
+    text = text.replace(",", "")
     try:
         return float(text)
     except ValueError as exc:
@@ -77,6 +79,20 @@ def _market_cap_billion_cny(value: object | None) -> float | None:
     if amount_wan is None:
         return None
     return amount_wan / WAN_CNY_PER_BILLION_CNY
+
+
+def _infer_ts_code_from_symbol(symbol: str) -> str:
+    normalized = symbol.strip()
+    if not normalized:
+        raise ValueError("symbol is required")
+
+    if normalized.startswith(("6", "9")) or normalized.startswith(("50", "51", "58")):
+        suffix = "SH"
+    elif normalized.startswith(("8", "4")):
+        suffix = "BJ"
+    else:
+        suffix = "SZ"
+    return f"{normalized}.{suffix}"
 
 
 class SampleMarketCapSnapshotProvider(MarketCapSnapshotProvider):
@@ -307,6 +323,71 @@ class TushareMarketCapSnapshotProvider(MarketCapSnapshotProvider):
         return sorted(records, key=lambda item: item.symbol or item.ts_code)
 
 
+class AKShareMarketCapSnapshotProvider(MarketCapSnapshotProvider):
+    provider_name = "akshare"
+
+    def fetch_snapshot(self) -> list[MarketCapSnapshotRecord]:
+        try:
+            akshare = importlib.import_module("akshare")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "akshare is required when provider=akshare. Install it in the project environment first."
+            ) from exc
+
+        fetcher = getattr(akshare, "stock_zh_a_spot_em", None)
+        if not callable(fetcher):
+            raise RuntimeError("AKShare does not expose stock_zh_a_spot_em in this environment.")
+
+        try:
+            frame = fetcher()
+        except Exception as exc:
+            raise RuntimeError(f"failed to fetch A-share spot snapshot from AKShare: {exc}") from exc
+
+        rows = _sdk_result_to_rows(frame)
+        if not rows:
+            raise RuntimeError("AKShare stock_zh_a_spot_em returned no rows.")
+
+        records: list[MarketCapSnapshotRecord] = []
+        seen: set[str] = set()
+        for row in rows:
+            symbol = _clean(row.get("代码") or row.get("code") or row.get("symbol"))
+            if not symbol:
+                continue
+            ts_code = _infer_ts_code_from_symbol(symbol)
+            if ts_code in seen:
+                continue
+
+            total_market_cap_yi = _clean_float(row.get("总市值") or row.get("总市值-动态") or row.get("total_market_cap"))
+            if total_market_cap_yi is None:
+                continue
+
+            circ_market_cap_yi = _clean_float(
+                row.get("流通市值") or row.get("circulating_market_cap")
+            )
+            as_of_date = _clean(row.get("最新行情时间") or row.get("更新时间") or row.get("latest_time"))
+            if as_of_date:
+                digits = "".join(ch for ch in as_of_date if ch.isdigit())
+                as_of_date = digits[:8] if len(digits) >= 8 else None
+
+            records.append(
+                MarketCapSnapshotRecord(
+                    ts_code=ts_code,
+                    symbol=symbol,
+                    name=_clean(row.get("名称") or row.get("name")),
+                    total_market_cap_billion_cny=total_market_cap_yi / YIYUAN_CNY_PER_BILLION_CNY,
+                    circulating_market_cap_billion_cny=(
+                        circ_market_cap_yi / YIYUAN_CNY_PER_BILLION_CNY
+                        if circ_market_cap_yi is not None
+                        else None
+                    ),
+                    as_of_date=as_of_date,
+                )
+            )
+            seen.add(ts_code)
+
+        return sorted(records, key=lambda item: item.symbol or item.ts_code)
+
+
 def create_market_cap_snapshot_provider(
     name: str,
     *,
@@ -335,5 +416,7 @@ def create_market_cap_snapshot_provider(
             token=token,
             trade_date=trade_date,
         )
+    if normalized_name == "akshare":
+        return AKShareMarketCapSnapshotProvider()
 
     raise ValueError(f"unsupported market-cap snapshot provider: {name}")

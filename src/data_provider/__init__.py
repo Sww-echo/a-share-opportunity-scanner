@@ -4,6 +4,7 @@ from .csv_store import STOCK_LIST_FIELDNAMES, load_stock_list, write_stock_list
 from .interfaces import StockListProvider
 from .models import StockListRecord
 from .providers import (
+    AKShareStockListProvider,
     CSVStockListProvider,
     SampleStockListProvider,
     TushareStockListProvider,
@@ -11,6 +12,7 @@ from .providers import (
 )
 
 __all__ = [
+    "AKShareStockListProvider",
     "CSVStockListProvider",
     "STOCK_LIST_FIELDNAMES",
     "SampleStockListProvider",

@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--provider",
-        choices=("sample", "csv"),
+        choices=("sample", "csv", "akshare"),
         default="sample",
         help="Technical snapshot provider. Default: sample.",
     )

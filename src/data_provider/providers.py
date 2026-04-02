@@ -62,6 +62,20 @@ def _sdk_result_to_rows(result: object) -> list[dict[str, object]]:
     return [item for item in rows if isinstance(item, dict)]
 
 
+def _infer_ts_code_from_symbol(symbol: str) -> str:
+    normalized = symbol.strip()
+    if not normalized:
+        raise ValueError("symbol is required")
+
+    if normalized.startswith(("6", "9")) or normalized.startswith(("50", "51", "58")):
+        suffix = "SH"
+    elif normalized.startswith(("8", "4")):
+        suffix = "BJ"
+    else:
+        suffix = "SZ"
+    return f"{normalized}.{suffix}"
+
+
 class SampleStockListProvider(StockListProvider):
     provider_name = "sample"
 
@@ -228,6 +242,73 @@ class TushareStockListProvider(StockListProvider):
         return sorted(records, key=lambda item: item.symbol)
 
 
+class AKShareStockListProvider(StockListProvider):
+    provider_name = "akshare"
+
+    def fetch_stock_list(self) -> list[StockListRecord]:
+        try:
+            akshare = importlib.import_module("akshare")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "akshare is required when provider=akshare. Install it in the project environment first."
+            ) from exc
+
+        fetchers = [
+            getattr(akshare, "stock_info_a_code_name", None),
+            getattr(akshare, "stock_zh_a_spot_em", None),
+        ]
+
+        rows: list[dict[str, object]] = []
+        for fetcher in fetchers:
+            if not callable(fetcher):
+                continue
+            try:
+                frame = fetcher()
+            except Exception:
+                continue
+            rows = _sdk_result_to_rows(frame)
+            if rows:
+                break
+
+        if not rows:
+            raise RuntimeError("failed to fetch A-share stock list from AKShare.")
+
+        records: list[StockListRecord] = []
+        seen: set[str] = set()
+        for row in rows:
+            symbol = _clean(row.get("code") or row.get("代码") or row.get("symbol"))
+            name = _clean(row.get("name") or row.get("名称"))
+            if not symbol or not name:
+                continue
+
+            ts_code = _infer_ts_code_from_symbol(symbol)
+            if ts_code in seen:
+                continue
+            seen.add(ts_code)
+
+            exchange = _exchange_from_ts_code(ts_code)
+            board = "主板"
+            if symbol.startswith(("300", "301")):
+                board = "创业板"
+            elif symbol.startswith("688"):
+                board = "科创板"
+            elif symbol.startswith(("8", "4")):
+                board = "北交所"
+
+            records.append(
+                StockListRecord(
+                    ts_code=ts_code,
+                    symbol=symbol,
+                    name=name,
+                    exchange=exchange,
+                    board=board,
+                    list_status="L",
+                )
+            )
+
+        return sorted(records, key=lambda item: item.symbol)
+
+
 def create_stock_list_provider(
     name: str,
     *,
@@ -246,5 +327,7 @@ def create_stock_list_provider(
         return CSVStockListProvider(source_path=source_path)
     if normalized_name == "tushare":
         return TushareStockListProvider(token=token, list_status=list_status)
+    if normalized_name == "akshare":
+        return AKShareStockListProvider()
 
     raise ValueError(f"unsupported stock-list provider: {name}")

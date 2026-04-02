@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--provider",
-        choices=("sample", "csv", "tushare"),
+        choices=("sample", "csv", "tushare", "akshare"),
         default="sample",
         help="Stock-list provider. Default: sample.",
     )

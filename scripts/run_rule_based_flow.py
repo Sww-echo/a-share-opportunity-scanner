@@ -57,7 +57,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--stock-list-provider",
-        choices=("sample", "csv"),
+        choices=("sample", "csv", "akshare"),
         default="sample",
         help="Stock-list provider for the end-to-end flow. Default: sample.",
     )
@@ -68,7 +68,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--market-cap-provider",
-        choices=("sample", "csv"),
+        choices=("sample", "csv", "akshare"),
         default="sample",
         help="Market-cap snapshot provider for the end-to-end flow. Default: sample.",
     )
@@ -79,7 +79,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--technical-provider",
-        choices=("sample", "csv"),
+        choices=("sample", "csv", "akshare"),
         default="sample",
         help="Technical snapshot provider for the end-to-end flow. Default: sample.",
     )

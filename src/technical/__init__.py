@@ -12,12 +12,14 @@ from .calculators import (
 from .models import TechnicalSnapshotRecord
 from .ohlcv_provider import OHLCVBar, OHLCVCSVTechnicalSnapshotProvider, load_ohlcv_bars
 from .providers import (
+    AKShareTechnicalSnapshotProvider,
     CSVTechnicalSnapshotProvider,
     SampleTechnicalSnapshotProvider,
     create_technical_snapshot_provider,
 )
 
 __all__ = [
+    "AKShareTechnicalSnapshotProvider",
     "CSVTechnicalSnapshotProvider",
     "OHLCVBar",
     "OHLCVCSVTechnicalSnapshotProvider",

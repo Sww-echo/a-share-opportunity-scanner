@@ -8,6 +8,7 @@ from .csv_store import (
 from .interfaces import MarketCapSnapshotProvider
 from .models import MarketCapSnapshotRecord
 from .providers import (
+    AKShareMarketCapSnapshotProvider,
     CSVMarketCapSnapshotProvider,
     SampleMarketCapSnapshotProvider,
     TushareMarketCapSnapshotProvider,
@@ -15,6 +16,7 @@ from .providers import (
 )
 
 __all__ = [
+    "AKShareMarketCapSnapshotProvider",
     "CSVMarketCapSnapshotProvider",
     "MARKET_CAP_SNAPSHOT_FIELDNAMES",
     "MarketCapSnapshotProvider",
